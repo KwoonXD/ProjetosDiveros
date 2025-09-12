@@ -5,54 +5,38 @@ import os
 import sys
 import streamlit as st
 import pandas as pd
-from utils.jira_api import jql_search, ping_me
 
-# Garante que o diretório do app esteja no sys.path
+# garante que o diretório do app está no sys.path
 sys.path.append(os.path.dirname(__file__))
+
+from utils.jira_api import jql_search, ping_me
 
 st.set_page_config(page_title="Field Service", page_icon="🛠️", layout="wide")
 
-# ---------- Util: sanitizador simples p/ JSON com comentários/trailing commas ----------
+# -------- util: remover comentários e vírgulas finais de JSON (caso alguém edite errado) -------
 def _strip_json_comments_and_trailing_commas(text: str) -> str:
-    # remove //... e /* ... */
-    text = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    # remove vírgulas à direita antes de } ]
-    text = re.sub(r",\s*([}\]])", r"\1", text)
+    text = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)      # // comments
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)      # /* ... */ comments
+    text = re.sub(r",\s*([}\]])", r"\1", text)                  # trailing commas
     return text.strip()
 
-# ---------- Fieldmap loader com tratamento de erros ----------
+# -------- loader do fieldmap com tratamento e fallback -------
 @st.cache_data
 def load_fieldmap():
     path = os.path.join("config", "fieldmap.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"Arquivo não encontrado: {path}")
-
-    with open(path, "r", encoding="utf-8") as f:
-        raw = f.read()
-
+    raw = open(path, "r", encoding="utf-8").read()
     try:
-        # tenta direto
         return json.loads(raw)
-    except json.JSONDecodeError as e:
-        # tenta sanitizar (remove comentários e trailing commas)
+    except json.JSONDecodeError:
         cleaned = _strip_json_comments_and_trailing_commas(raw)
         try:
-            data = json.loads(cleaned)
-            # avisa que foi sanitizado
-            st.warning(
-                "O `config/fieldmap.json` tinha comentários ou vírgulas sobrando. "
-                "Consegui ler após sanitizar. Ideal corrigir o arquivo na origem."
-            )
-            return data
+            st.warning("O `config/fieldmap.json` tinha comentários/vírgulas sobrando. Li após sanitizar. Corrija o arquivo na origem.")
+            return json.loads(cleaned)
         except json.JSONDecodeError as e2:
-            # propaga erro explicativo
-            raise ValueError(
-                "Não foi possível carregar `config/fieldmap.json` (JSON inválido). "
-                f"Tente validar o arquivo. Erro bruto: {e2}"
-            )
+            raise ValueError(f"JSON inválido em `config/fieldmap.json`. Erro: {e2}")
 
-# ---------- Fallback padrão caso o JSON quebrou ----------
 DEFAULT_FIELDMAP = {
     "projetos": {
         "NOVO": {
@@ -78,7 +62,7 @@ DEFAULT_FIELDMAP = {
     "padrao": "NOVO"
 }
 
-# ---------- Tenta carregar o fieldmap de verdade; se falhar, mostra erro e usa fallback ----------
+# carrega fieldmap (ou fallback)
 try:
     FIELD_MAP = load_fieldmap()
 except Exception as e:
@@ -98,14 +82,18 @@ project_key = proj_cfg.get("project_key", "ABC")
 statuses_map = proj_cfg.get("statuses", {})
 fields = proj_cfg.get("fields", {})
 
-# ---------- Sidebar: diagnóstico ----------
+# -------- Sidebar: diagnóstico --------
 st.sidebar.markdown("### Diagnóstico")
 if st.sidebar.button("Testar credenciais (myself)"):
-    ok, data = ping_me()
-    st.sidebar.write("OK ✅" if ok else "Falhou ❌")
-    st.sidebar.json(data)
+    try:
+        ok, data = ping_me()
+        st.sidebar.write("OK ✅" if ok else "Falhou ❌")
+        st.sidebar.json(data)
+    except Exception as e:
+        st.sidebar.error(f"Erro no teste: {e}")
+        st.sidebar.info("Verifique os *Secrets* (seção [JIRA]) na Cloud.")
 
-# ---------- Abas ----------
+# -------- Abas --------
 tab1, tab2, tab3 = st.tabs(["📋 Chamados", "📊 Visão Geral", "🧭 Descoberta"])
 
 with tab1:
@@ -157,4 +145,13 @@ with tab2:
 with tab3:
     st.subheader("Descoberta")
     st.write("Use para inspecionar status e descobrir customfields rapidamente.")
-    q = st.text_inp_
+    # >>>>>> AQUI estava o typo: use text_input (sem underline no fim)
+    q = st.text_input("JQL", value=f"project = {project_key} ORDER BY created DESC")
+    if st.button("Executar JQL"):
+        try:
+            issues = jql_search(q)
+            st.write(f"Retornou {len(issues)} issues")
+            if issues:
+                st.json(issues[0].get("fields", {}))
+        except Exception as e:
+            st.error(f"Erro: {e}")
