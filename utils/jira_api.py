@@ -5,8 +5,9 @@ import streamlit as st
 def _secrets():
     """
     Lê as credenciais e configurações do arquivo .streamlit/secrets.toml
+    (ou da aba Secrets na Streamlit Cloud)
     """
-    cfg = st.secrets["JIRA"]
+    cfg = st.secrets["JIRA"]  # levanta KeyError se não existir
     return {
         "email": cfg["EMAIL"],
         "token": cfg["API_TOKEN"],
@@ -18,19 +19,12 @@ def _secrets():
     }
 
 def _base_url():
-    """
-    Monta a URL base de acordo com a configuração (EX API ou domínio do Jira).
-    """
     s = _secrets()
     if s["use_ex"]:
         return f"https://api.atlassian.com/ex/jira/{s['cloud_id']}/rest/api/3"
     return f"https://{s['subdomain']}.atlassian.net/rest/api/3"
 
 def jql_search(jql: str):
-    """
-    Executa uma busca no Jira via JQL, com paginação.
-    Retorna a lista de issues completas.
-    """
     s = _secrets()
     auth = (s["email"], s["token"])
     base = _base_url()
@@ -52,7 +46,7 @@ def jql_search(jql: str):
 
 def ping_me():
     """
-    Testa conexão com Jira usando o endpoint /myself
+    Testa conexão com Jira usando /myself
     Retorna (True, json) se sucesso ou (False, erro) se falhou.
     """
     s = _secrets()
