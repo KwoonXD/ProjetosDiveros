@@ -1,6 +1,8 @@
 import json
 import streamlit as st
 import pandas as pd
+import sys, os
+sys.path.append(os.path.dirname(__file__))
 from utils.jira_api import jql_search, ping_me
 
 st.set_page_config(page_title="Field Service", page_icon="🛠️", layout="wide")
