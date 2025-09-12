@@ -1,1 +1,12 @@
+def gerar_mensagem(issue_key: str, loja: str | None):
+    base = f"Chamado {issue_key}"
+    if loja:
+        base += f" | Loja {loja}"
+    return base
 
+def verificar_duplicidade(chaves: list[str]) -> list[str]:
+    seen, dup = set(), []
+    for k in chaves:
+        if k in seen: dup.append(k)
+        else: seen.add(k)
+    return dup
