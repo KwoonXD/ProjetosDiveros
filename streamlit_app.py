@@ -1,9 +1,9 @@
-# --- FIX de path para garantir que utils seja encontrado ---
+# --- path fix ---
 import os, sys
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 if APP_ROOT not in sys.path:
     sys.path.insert(0, APP_ROOT)
-# -----------------------------------------------------------
+# ---------------
 
 import json, datetime as dt
 import streamlit as st
@@ -14,7 +14,7 @@ from utils.messages import build_briefing
 st.set_page_config(page_title="FS – Briefings por Data", layout="wide")
 st.title("📌 FS – Briefings do Técnico (agrupados por data)")
 
-# Sidebar - configurações
+# Sidebar
 with st.sidebar:
     st.header("Configurações")
     base_url = st.text_input("Base URL", "https://delfia.atlassian.net")
@@ -25,23 +25,37 @@ with st.sidebar:
     jql = st.text_area("JQL", jql_default, height=80)
     fmap_file = st.file_uploader("fieldmap.json (customfields do FS)", type="json")
 
-if not (base_url and email and token and fmap_file):
-    st.warning("Configure as credenciais e faça upload do fieldmap.json")
+if not (base_url and email and token):
+    st.warning("Informe base URL, e-mail e token.")
     st.stop()
 
-# Carregar mapeamento
-fmap = json.load(fmap_file)
+jira = JiraClient(base_url, email, token)
 
-# Filtros de datas
+# ---- Descobrir IDs de campos (dump por issue) ----
+with st.expander("🔎 Descobrir IDs (cole um issue, ex.: FS-8877)"):
+    issue_key = st.text_input("Issue key", value="", placeholder="FS-8877")
+    if st.button("Dump de campos", type="primary", disabled=not issue_key):
+        try:
+            report, _issue = jira.dump_fields(issue_key.strip())
+            st.code(report, language="text")
+            st.success("Use as colunas da esquerda (customfield_xxxxx) no seu fieldmap.json.")
+        except Exception as e:
+            st.error(f"Falha no dump: {e}")
+
+# --- filtros de datas e upload do fieldmap (para formatar os briefings) ---
 col1, col2 = st.columns(2)
 with col1:
     start_date = st.date_input("Data inicial", dt.date.today() - dt.timedelta(days=7))
 with col2:
     end_date = st.date_input("Data final", dt.date.today() + dt.timedelta(days=14))
 
-jira = JiraClient(base_url, email, token)
+if fmap_file is None:
+    st.info("Faça upload do seu fieldmap.json para formatar os briefings.")
+    st.stop()
 
-# Buscar issues com tratamento de erro de API
+fmap = json.load(fmap_file)
+
+# Buscar issues (com os 4 modos do cliente novo)
 try:
     with st.spinner("Carregando chamados..."):
         issues = list(jira.search_all(jql, fields=None, page_size=100))
@@ -49,28 +63,23 @@ except Exception as e:
     st.error(f"Falha ao consultar o Jira: {e}")
     st.stop()
 
+# Filtrar e agrupar por data (agendamento -> created)
 items = []
 for issue in issues:
     briefing = build_briefing(issue, fmap, JiraClient.pick_display)
-
     fields = issue.get("fields", {})
-    # prioridade: data_agendamento -> created
     data_ag = fields.get(fmap.get("data_agendamento")) or fields.get("created")
-
     try:
         gdate = dt.date.fromisoformat(str(data_ag)[:10])
     except Exception:
         gdate = None
-
     if gdate and (gdate < start_date or gdate > end_date):
         continue
-
     items.append((gdate, issue.get("key", ""), briefing))
 
-# Ordenação por data e chave
 items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
 
-# Renderização
+# Render
 if not items:
     st.info("Nenhum chamado encontrado com os filtros atuais.")
 else:
