@@ -15,74 +15,35 @@ class JiraClient:
         url = f"{self.base_url}{path}"
         return self.session.post(url, json=payload, timeout=timeout)
 
-    def _try_search_once(self, mode: int, jql: str, page_size: int, start_at: int, fields):
-        """
-        mode:
-          1 -> POST /rest/api/3/search/jql  with {'jql': ...}
-          2 -> POST /rest/api/3/search/jql  with {'query': ...}
-          3 -> POST /rest/api/3/search      with {'jql': ...}
-        """
-        if mode == 1:
-            path = "/rest/api/3/search/jql"
-            payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
-        elif mode == 2:
-            path = "/rest/api/3/search/jql"
-            payload = {"query": jql, "maxResults": page_size, "startAt": start_at}
-        else:
-            path = "/rest/api/3/search"
-            payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
-
-        if fields is not None:
-            payload["fields"] = fields
-
-        resp = self._post(path, payload)
-        ok = (resp.status_code == 200)
-        return ok, resp
-
     def search_all(self, jql: str, fields=None, page_size: int = 100):
         """
-        Itera todos os resultados de um JQL. Para cada página tenta:
-          1) /search/jql com 'jql'
-          2) /search/jql com 'query'
-          3) /search com 'jql'
-        Progride com o primeiro que retornar 200. Se todos falharem, levanta erro.
+        Novo formato obrigatório: POST /rest/api/3/search/jql
+        {
+          "queries": [ { "jql": "...", "startAt": 0, "maxResults": 50, "fields": [...] } ]
+        }
         """
         start_at = 0
-        working_mode = None  # trava o modo que funcionou para as próximas páginas
-
         while True:
-            modes = [working_mode] if working_mode else [1, 2, 3]
-            last_resp = None
-            success = False
+            query_obj = {
+                "jql": jql,
+                "startAt": start_at,
+                "maxResults": page_size,
+            }
+            if fields is not None:
+                query_obj["fields"] = fields
 
-            for mode in modes:
-                if mode is None:
-                    continue
-                ok, resp = self._try_search_once(mode, jql, page_size, start_at, fields)
-                last_resp = resp
-                if ok:
-                    success = True
-                    working_mode = mode  # fixar para as próximas páginas
-                    data = resp.json()
-                    break
+            payload = {"queries": [query_obj]}
+            r = self._post("/rest/api/3/search/jql", payload)
 
-            if not success:
-                # tenta os demais modos (se ainda não tentou)
-                for mode in [m for m in [1,2,3] if m not in modes]:
-                    ok, resp = self._try_search_once(mode, jql, page_size, start_at, fields)
-                    last_resp = resp
-                    if ok:
-                        success = True
-                        working_mode = mode
-                        data = resp.json()
-                        break
+            if r.status_code != 200:
+                raise RuntimeError(f"Jira search error ({r.status_code}): {r.text}")
 
-            if not success:
-                detail = last_resp.text if last_resp is not None else "no response"
-                code = last_resp.status_code if last_resp is not None else "?"
-                raise RuntimeError(f"Jira search error ({code}): {detail}")
+            data = r.json()
+            queries = data.get("queries", [])
+            if not queries:
+                break
 
-            issues = data.get("issues", [])
+            issues = queries[0].get("issues", [])
             if not issues:
                 break
 
@@ -90,7 +51,7 @@ class JiraClient:
                 yield it
 
             start_at += len(issues)
-            if start_at >= data.get("total", start_at):
+            if start_at >= queries[0].get("total", start_at):
                 break
 
     @staticmethod
