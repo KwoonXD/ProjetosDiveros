@@ -58,4 +58,32 @@ for issue in issues:
     data_ag = fields.get(fmap.get("data_agendamento")) or fields.get("created")
 
     try:
-        gd
+        gdate = dt.date.fromisoformat(str(data_ag)[:10])
+    except Exception:
+        gdate = None
+
+    if gdate and (gdate < start_date or gdate > end_date):
+        continue
+
+    items.append((gdate, issue.get("key", ""), briefing))
+
+# Ordenação por data e chave
+items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
+
+# Renderização
+if not items:
+    st.info("Nenhum chamado encontrado com os filtros atuais.")
+else:
+    # Agrupar por dia
+    from itertools import groupby
+    def kf(row): return row[0] or dt.date.min
+    for day, group in groupby(items, key=kf):
+        label = (day.strftime("%d/%m/%Y") if day != dt.date.min else "Sem data")
+        group = list(group)
+        with st.expander(f"📅 {label} — {len(group)} chamado(s)", expanded=True):
+            for gdate, key, briefing in group:
+                st.markdown(f"### {key}")
+                st.text_area("Script do técnico", value=briefing, height=300, key=f"ta_{key}")
+                st.download_button("Baixar TXT", briefing.encode("utf-8"),
+                                   file_name=f"{key}.txt", mime="text/plain", key=f"dl_{key}")
+                st.divider()
