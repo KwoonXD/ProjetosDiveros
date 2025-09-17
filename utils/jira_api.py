@@ -11,23 +11,48 @@ class JiraClient:
             "Authorization": f"Basic {token}",
         })
 
+    def _post(self, path: str, payload: dict, timeout: int = 60):
+        url = f"{self.base_url}{path}"
+        return self.session.post(url, json=payload, timeout=timeout)
+
     def search_all(self, jql: str, fields=None, page_size: int = 100):
-        """Retorna todos os chamados de acordo com o JQL (paginado)."""
+        """
+        Itera sobre TODOS os resultados de um JQL, usando o endpoint novo
+        /rest/api/3/search/jql. Se a instância ainda aceitar, faz fallback
+        para /rest/api/3/search.
+        """
         start_at = 0
+        use_new = True  # tenta o endpoint novo primeiro
+
         while True:
             payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
             if fields is not None:
                 payload["fields"] = fields
-            url = f"{self.base_url}/rest/api/3/search"
-            r = self.session.post(url, json=payload, timeout=60)
+
+            path = "/rest/api/3/search/jql" if use_new else "/rest/api/3/search"
+            r = self._post(path, payload)
+
+            # Se o servidor responder 410/404 no novo endpoint, troca para o antigo uma vez
+            if use_new and r.status_code in (404, 410):
+                use_new = False
+                r = self._post("/rest/api/3/search", payload)
+
             if r.status_code != 200:
-                raise RuntimeError(f"Jira search error ({r.status_code}): {r.text}")
+                # Propaga a mensagem do servidor para facilitar debug no Streamlit
+                try:
+                    detail = r.text
+                except Exception:
+                    detail = f"HTTP {r.status_code}"
+                raise RuntimeError(f"Jira search error ({r.status_code}): {detail}")
+
             data = r.json()
             issues = data.get("issues", [])
             if not issues:
                 break
+
             for it in issues:
                 yield it
+
             start_at += len(issues)
             if start_at >= data.get("total", start_at):
                 break
