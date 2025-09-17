@@ -9,7 +9,7 @@ import streamlit as st
 from itertools import groupby
 
 from utils.jira_api import JiraClient
-from utils.messages import build_briefing  # seu messages.py anterior continua valendo
+from utils.messages import build_briefing
 
 st.set_page_config(page_title="FS – Briefings por Data", layout="wide")
 st.title("📌 FS – Briefings do Técnico (agrupados por data)")
@@ -21,9 +21,13 @@ with st.sidebar:
     email = st.text_input("E-mail", "wt@parceiro.delfia.tech")
     token = st.text_input("API Token", type="password")
     project_key = st.text_input("Projeto", "FS")
-    jql = st.text_area("JQL (usado quando houver acesso core)",
-                       f"project = {project_key} AND statusCategory != Done ORDER BY created DESC", height=80)
-    force_core = st.toggle("Forçar API Core (JQL)", value=False, help="Ignora JSM e usa só /rest/api/3/search/jql")
+    jql = st.text_area(
+        "JQL (usado quando houver acesso core)",
+        f"project = {project_key} AND statusCategory != Done ORDER BY created DESC",
+        height=80,
+    )
+    force_core = st.toggle("Forçar API Core (JQL)", value=True,
+                           help="Ignora JSM e usa apenas /rest/api/3/search")
     fmap_file = st.file_uploader("fieldmap.json (customfields do FS)", type="json")
 
 if not (base_url and email and token):
@@ -32,7 +36,7 @@ if not (base_url and email and token):
 
 jira = JiraClient(base_url, email, token)
 
-# Diagnóstico rápido
+# Diagnóstico
 with st.expander("🧪 Diagnóstico de autenticação (API Core / JSM)", expanded=False):
     c1, c2 = st.columns(2)
     with c1:
@@ -43,13 +47,6 @@ with st.expander("🧪 Diagnóstico de autenticação (API Core / JSM)", expande
         code, body = jira.diag_jsm()
         st.write("**/rest/servicedeskapi/servicedesk** →", code)
         st.code(body or "(vazio)", language="json")
-
-# Descobrir IDs (opcional; exige acesso à issue pelo menos em um dos modos)
-with st.expander("🔎 Descobrir IDs (cole um issue, ex.: FS-8877)", expanded=False):
-    st.caption("Esta seção depende de permissões. Se sua conta for 'customer', a parte Core pode não abrir.")
-    issue_key = st.text_input("Issue key", value="", placeholder="FS-8877")
-    if st.button("Dump de campos", type="primary", disabled=not issue_key.strip()):
-        st.info("No momento o dump por issue está desabilitado neste snippet — foque na busca por JQL/JSM acima para validar acesso.")
 
 # Filtros
 col1, col2 = st.columns(2)
@@ -62,7 +59,7 @@ if fmap_file is None:
     st.info("Faça upload do seu fieldmap.json para formatar os briefings.")
     st.stop()
 
-# carregar fieldmap
+# Carregar fieldmap
 try:
     fmap = json.load(fmap_file)
 except Exception as e:
@@ -72,16 +69,16 @@ except Exception as e:
 # Buscar issues
 try:
     with st.spinner("Carregando chamados..."):
-        issues = list(jira.search_all(project_key, jql=jql, fields=None, page_size=100, force_core=force_core))
+        issues = list(jira.search_all(project_key, jql=jql, fields=None,
+                                      page_size=100, force_core=force_core))
 except Exception as e:
     st.error(f"Falha ao consultar: {e}")
     st.stop()
 
-# Agrupar/mostrar
+# Agrupar por data
 items = []
 for issue in issues:
     fields = issue.get("fields", {}) or {}
-    # preferir data_agendamento; cair para created
     data_ag = fields.get(fmap.get("data_agendamento")) or fields.get("created")
     try:
         gdate = dt.date.fromisoformat(str(data_ag)[:10])
@@ -90,10 +87,11 @@ for issue in issues:
     if gdate and (gdate < start_date or gdate > end_date):
         continue
     briefing = build_briefing(issue, fmap, lambda v: v if isinstance(v, str) else str(v))
-    items.append((gdate, issue.get("key",""), briefing))
+    items.append((gdate, issue.get("key", ""), briefing))
 
 items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
 
+# Render
 if not items:
     st.info("Nenhum chamado encontrado com os filtros atuais.")
 else:
