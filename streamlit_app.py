@@ -74,7 +74,6 @@ items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
 if not items:
     st.info("Nenhum chamado encontrado com os filtros atuais.")
 else:
-    # Agrupar por dia
     from itertools import groupby
     def kf(row): return row[0] or dt.date.min
     for day, group in groupby(items, key=kf):
