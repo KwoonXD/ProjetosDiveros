@@ -1,3 +1,10 @@
+# --- FIX de path para garantir que utils seja encontrado ---
+import os, sys
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+if APP_ROOT not in sys.path:
+    sys.path.insert(0, APP_ROOT)
+# -----------------------------------------------------------
+
 import json, datetime as dt
 import streamlit as st
 
@@ -7,6 +14,7 @@ from utils.messages import build_briefing
 st.set_page_config(page_title="FS – Briefings por Data", layout="wide")
 st.title("📌 FS – Briefings do Técnico (agrupados por data)")
 
+# Sidebar - configurações
 with st.sidebar:
     st.header("Configurações")
     base_url = st.text_input("Base URL", "https://delfia.atlassian.net")
@@ -20,15 +28,18 @@ if not (base_url and email and token and fmap_file):
     st.warning("Configure as credenciais e faça upload do fieldmap.json")
     st.stop()
 
+# carregar mapeamento
 fmap = json.load(fmap_file)
 jira = JiraClient(base_url, email, token)
 
+# Filtros de datas
 col1, col2 = st.columns(2)
 with col1:
     start_date = st.date_input("Data inicial", dt.date.today() - dt.timedelta(days=7))
 with col2:
     end_date = st.date_input("Data final", dt.date.today() + dt.timedelta(days=7))
 
+# Buscar issues
 with st.spinner("Carregando chamados..."):
     issues = list(jira.search_all(jql, fields=None))
 
@@ -47,6 +58,7 @@ for issue in issues:
 
 items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
 
+# Renderizar resultados
 for gdate, key, briefing in items:
     label = gdate.strftime("%d/%m/%Y") if gdate else "Sem data"
     with st.expander(f"📅 {label} – {key}", expanded=False):
