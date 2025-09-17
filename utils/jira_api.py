@@ -17,28 +17,34 @@ class JiraClient:
 
     def search_all(self, jql: str, fields=None, page_size: int = 100):
         """
-        Itera sobre TODOS os resultados de um JQL, usando o endpoint novo
-        /rest/api/3/search/jql. Se a instância ainda aceitar, faz fallback
-        para /rest/api/3/search.
+        Itera sobre TODOS os resultados de um JQL.
+
+        - Tenta primeiro o endpoint novo:   POST /rest/api/3/search/jql   (usa chave 'query')
+        - Se der 404/410, faz fallback para POST /rest/api/3/search        (usa chave 'jql')
         """
         start_at = 0
-        use_new = True  # tenta o endpoint novo primeiro
+        use_new = True  # tenta novo primeiro
 
         while True:
-            payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
-            if fields is not None:
-                payload["fields"] = fields
+            if use_new:
+                payload = {"query": jql, "maxResults": page_size, "startAt": start_at}
+                if fields is not None:
+                    payload["fields"] = fields
+                path = "/rest/api/3/search/jql"
+            else:
+                payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
+                if fields is not None:
+                    payload["fields"] = fields
+                path = "/rest/api/3/search"
 
-            path = "/rest/api/3/search/jql" if use_new else "/rest/api/3/search"
             r = self._post(path, payload)
 
-            # Se o servidor responder 410/404 no novo endpoint, troca para o antigo uma vez
+            # se a instância não suportar o novo, troca uma vez para o antigo
             if use_new and r.status_code in (404, 410):
                 use_new = False
-                r = self._post("/rest/api/3/search", payload)
+                continue
 
             if r.status_code != 200:
-                # Propaga a mensagem do servidor para facilitar debug no Streamlit
                 try:
                     detail = r.text
                 except Exception:
