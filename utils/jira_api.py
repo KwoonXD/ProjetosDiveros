@@ -2,6 +2,7 @@ import base64
 import requests
 from typing import Iterable, Optional, List
 
+
 class JiraClient:
     """
     Cliente simples (modelo antigo):
@@ -9,18 +10,22 @@ class JiraClient:
     - Usa somente o endpoint estável: POST /rest/api/3/search
     - Faz paginação até trazer todos os issues do JQL
     """
+
     def __init__(self, base_url: str, email: str, api_token: str):
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         token = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-        self.session.headers.update({
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Basic {token}",
-        })
+        self.session.headers.update(
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {token}",
+            }
+        )
 
-    def search_all(self, jql: str, fields: Optional[List[str]] = None,
-                   page_size: int = 100) -> Iterable[dict]:
+    def search_all(
+        self, jql: str, fields: Optional[List[str]] = None, page_size: int = 100
+    ) -> Iterable[dict]:
         """
         Itera por todos os issues que batem no JQL.
         Endpoint: POST /rest/api/3/search
@@ -36,9 +41,10 @@ class JiraClient:
             if fields is not None:
                 payload["fields"] = fields
 
-            r = self.session.post(f"{self.base_url}/rest/api/3/search", json=payload, timeout=60)
+            url = f"{self.base_url}/rest/api/3/search"  # <- CORRETO (sem /jql)
+            r = self.session.post(url, json=payload, timeout=60)
+
             if r.status_code != 200:
-                # mantém o comportamento do app antigo: estoura com a mensagem bruta da API
                 raise RuntimeError(f"Jira search error ({r.status_code}): {r.text}")
 
             data = r.json()
