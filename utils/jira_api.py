@@ -15,43 +15,73 @@ class JiraClient:
         url = f"{self.base_url}{path}"
         return self.session.post(url, json=payload, timeout=timeout)
 
+    def _try_search_once(self, mode: int, jql: str, page_size: int, start_at: int, fields):
+        """
+        mode:
+          1 -> POST /rest/api/3/search/jql  with {'jql': ...}
+          2 -> POST /rest/api/3/search/jql  with {'query': ...}
+          3 -> POST /rest/api/3/search      with {'jql': ...}
+        """
+        if mode == 1:
+            path = "/rest/api/3/search/jql"
+            payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
+        elif mode == 2:
+            path = "/rest/api/3/search/jql"
+            payload = {"query": jql, "maxResults": page_size, "startAt": start_at}
+        else:
+            path = "/rest/api/3/search"
+            payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
+
+        if fields is not None:
+            payload["fields"] = fields
+
+        resp = self._post(path, payload)
+        ok = (resp.status_code == 200)
+        return ok, resp
+
     def search_all(self, jql: str, fields=None, page_size: int = 100):
         """
-        Itera sobre TODOS os resultados de um JQL.
-
-        - Tenta primeiro o endpoint novo:   POST /rest/api/3/search/jql   (usa chave 'query')
-        - Se der 404/410, faz fallback para POST /rest/api/3/search        (usa chave 'jql')
+        Itera todos os resultados de um JQL. Para cada página tenta:
+          1) /search/jql com 'jql'
+          2) /search/jql com 'query'
+          3) /search com 'jql'
+        Progride com o primeiro que retornar 200. Se todos falharem, levanta erro.
         """
         start_at = 0
-        use_new = True  # tenta novo primeiro
+        working_mode = None  # trava o modo que funcionou para as próximas páginas
 
         while True:
-            if use_new:
-                payload = {"query": jql, "maxResults": page_size, "startAt": start_at}
-                if fields is not None:
-                    payload["fields"] = fields
-                path = "/rest/api/3/search/jql"
-            else:
-                payload = {"jql": jql, "maxResults": page_size, "startAt": start_at}
-                if fields is not None:
-                    payload["fields"] = fields
-                path = "/rest/api/3/search"
+            modes = [working_mode] if working_mode else [1, 2, 3]
+            last_resp = None
+            success = False
 
-            r = self._post(path, payload)
+            for mode in modes:
+                if mode is None:
+                    continue
+                ok, resp = self._try_search_once(mode, jql, page_size, start_at, fields)
+                last_resp = resp
+                if ok:
+                    success = True
+                    working_mode = mode  # fixar para as próximas páginas
+                    data = resp.json()
+                    break
 
-            # se a instância não suportar o novo, troca uma vez para o antigo
-            if use_new and r.status_code in (404, 410):
-                use_new = False
-                continue
+            if not success:
+                # tenta os demais modos (se ainda não tentou)
+                for mode in [m for m in [1,2,3] if m not in modes]:
+                    ok, resp = self._try_search_once(mode, jql, page_size, start_at, fields)
+                    last_resp = resp
+                    if ok:
+                        success = True
+                        working_mode = mode
+                        data = resp.json()
+                        break
 
-            if r.status_code != 200:
-                try:
-                    detail = r.text
-                except Exception:
-                    detail = f"HTTP {r.status_code}"
-                raise RuntimeError(f"Jira search error ({r.status_code}): {detail}")
+            if not success:
+                detail = last_resp.text if last_resp is not None else "no response"
+                code = last_resp.status_code if last_resp is not None else "?"
+                raise RuntimeError(f"Jira search error ({code}): {detail}")
 
-            data = r.json()
             issues = data.get("issues", [])
             if not issues:
                 break
