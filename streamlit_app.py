@@ -21,46 +21,41 @@ with st.sidebar:
     email = st.text_input("E-mail", "wt@parceiro.delfia.tech")
     token = st.text_input("API Token", type="password")
     project_key = st.text_input("Projeto", "FS")
-    jql = st.text_area("JQL", f"project = {project_key} AND statusCategory != Done ORDER BY created DESC")
-    fmap_file = st.file_uploader("fieldmap.json", type="json")
+    jql_default = f"project = {project_key} AND statusCategory != Done ORDER BY created DESC"
+    jql = st.text_area("JQL", jql_default, height=80)
+    fmap_file = st.file_uploader("fieldmap.json (customfields do FS)", type="json")
 
 if not (base_url and email and token and fmap_file):
     st.warning("Configure as credenciais e faça upload do fieldmap.json")
     st.stop()
 
-# carregar mapeamento
+# Carregar mapeamento
 fmap = json.load(fmap_file)
-jira = JiraClient(base_url, email, token)
 
 # Filtros de datas
 col1, col2 = st.columns(2)
 with col1:
     start_date = st.date_input("Data inicial", dt.date.today() - dt.timedelta(days=7))
 with col2:
-    end_date = st.date_input("Data final", dt.date.today() + dt.timedelta(days=7))
+    end_date = st.date_input("Data final", dt.date.today() + dt.timedelta(days=14))
 
-# Buscar issues
-with st.spinner("Carregando chamados..."):
-    issues = list(jira.search_all(jql, fields=None))
+jira = JiraClient(base_url, email, token)
+
+# Buscar issues com tratamento de erro de API
+try:
+    with st.spinner("Carregando chamados..."):
+        issues = list(jira.search_all(jql, fields=None, page_size=100))
+except Exception as e:
+    st.error(f"Falha ao consultar o Jira: {e}")
+    st.stop()
 
 items = []
 for issue in issues:
     briefing = build_briefing(issue, fmap, JiraClient.pick_display)
+
     fields = issue.get("fields", {})
+    # prioridade: data_agendamento -> created
     data_ag = fields.get(fmap.get("data_agendamento")) or fields.get("created")
+
     try:
-        gdate = dt.date.fromisoformat(str(data_ag)[:10])
-    except Exception:
-        gdate = None
-    if gdate and (gdate < start_date or gdate > end_date):
-        continue
-    items.append((gdate, issue["key"], briefing))
-
-items.sort(key=lambda x: (x[0] or dt.date.min, x[1]))
-
-# Renderizar resultados
-for gdate, key, briefing in items:
-    label = gdate.strftime("%d/%m/%Y") if gdate else "Sem data"
-    with st.expander(f"📅 {label} – {key}", expanded=False):
-        st.text_area("Script", value=briefing, height=300, key=f"ta_{key}")
-        st.download_button("Baixar TXT", briefing.encode("utf-8"), file_name=f"{key}.txt", mime="text/plain")
+        gd
