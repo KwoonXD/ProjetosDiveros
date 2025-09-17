@@ -65,7 +65,7 @@ def build_briefing(issue, fmap, pick_display):
         "_created": f.get("created", ""),
     }
 
-    # separar data/hora se vier em datetime único
+    # Se só houver datetime no campo de agendamento, separa data/hora
     if data["data_agendamento"] and not data["hora_agendamento"]:
         try:
             dt = dtparser.parse(data["data_agendamento"])
